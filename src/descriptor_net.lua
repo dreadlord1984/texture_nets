@@ -52,10 +52,8 @@ function ArtisticCriterion:updateOutput(input)
 end
 
 function ArtisticCriterion:updateGradInput(input, gradOutput)
-  self.gradInput= self.gradInput or {nil,input[2].new()}
-  -- self.gradInput[2]:resizeAs(input[2]):zero()
-
-  self.gradInput[1] = self.descriptor_net:backward(input[1])
+  self.gradInput= self.gradInput or {nil, input[2].new()}
+  self.gradInput[1] = self.descriptor_net:updateGradInput(input[1])
   return self.gradInput
 end
 
@@ -66,19 +64,16 @@ end
 
 function create_descriptor_net(params)
 
-  local cnn = loadcaffe.load(params.proto_file, params.model_file, params.backend):cuda()
+  local cnn = loadcaffe.load(params.proto_file, params.model_file, params.backend):type(dtype)
 
   -- load texture
   local texture_image = image.load(params.texture, 3)
   if params.style_size > 0 then 
     texture_image = image.scale(texture_image, params.style_size, 'bicubic'):float()
   end
-  local texture_image = preprocess(texture_image):cuda():add_dummy()
+  local texture_image = preprocess(texture_image):type(dtype):add_dummy()
 
-
-  params.content_layers = params.content_layers or ''
   local content_layers = params.content_layers:split(",") 
-  
   local texture_layers  = params.texture_layers:split(",")
 
   -- Set up the network, inserting texture and content loss modules
@@ -92,11 +87,7 @@ function create_descriptor_net(params)
       local name = layer.name
       local layer_type = torch.type(layer)
       local is_pooling = (layer_type == 'cudnn.SpatialMaxPooling' or layer_type == 'nn.SpatialMaxPooling')
-      
-      if layer_type == 'nn.SpatialConvolution' or layer_type == 'nn.SpatialConvolutionMM' or layer_type == 'cudnn.SpatialConvolution' then
-        layer.accGradParameters = nop
-      end
-      
+
       if params.vgg_no_pad and (layer_type == 'nn.SpatialConvolution' or layer_type == 'nn.SpatialConvolutionMM' or layer_type == 'cudnn.SpatialConvolution') then
           print (name, ': padding set to 0')
 
@@ -112,7 +103,7 @@ function create_descriptor_net(params)
         print("Setting up content layer", i, ":", layer.name)
 
         local norm = false
-        local loss_module = nn.ContentLoss(params.content_weight, norm):cuda()
+        local loss_module = nn.ContentLoss(params.content_weight, norm):type(dtype)
         net:add(loss_module)
         table.insert(content_modules, loss_module)
         next_content_idx = next_content_idx + 1
@@ -122,15 +113,15 @@ function create_descriptor_net(params)
       ---------------------------------
       if name == texture_layers[next_texture_idx] then
         print("Setting up texture layer  ", i, ":", layer.name)
-        local gram = GramMatrix():cuda()
+        local gram = GramMatrix():type(dtype)
 
         local target_features = net:forward(texture_image):clone()
-        local target = gram:forward(nn.View(-1):cuda():setNumInputDims(2):forward(target_features[1])):clone()
+        local target = gram:forward(nn.View(-1):type(dtype):setNumInputDims(2):forward(target_features[1])):clone()
 
         target:div(target_features[1]:nElement())
 
         local norm = params.normalize_gradients
-        local loss_module = nn.TextureLoss(params.texture_weight, target, norm):cuda()
+        local loss_module = nn.TextureLoss(params.texture_weight, target, norm):type(dtype)
         
         net:add(loss_module)
         table.insert(texture_modules, loss_module)

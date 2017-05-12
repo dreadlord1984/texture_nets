@@ -1,11 +1,15 @@
 # Texture Networks + Instance normalization: Feed-forward Synthesis of Textures and Stylized Images
 
-In [our paper](http://arxiv.org/abs/1603.03417) we describe a faster way to generate textures and stylize images. It requires learning a feedforward generator with a loss function proposed by [Gatys et. al.](http://arxiv.org/abs/1505.07376). When the model is trained, a texture sample or stylized image any size can be generated instantly.
+In the paper [Texture Networks: Feed-forward Synthesis of Textures and Stylized Images](http://arxiv.org/abs/1603.03417) we describe a faster way to generate textures and stylize images. It requires learning a feedforward generator with a loss function proposed by [Gatys et al.](http://arxiv.org/abs/1505.07376). When the model is trained, a texture sample or stylized image of any size can be generated instantly.
 
-[Instance Normalization: The Missing Ingredient for Fast Stylization](https://arxiv.org/abs/1607.08022) presents a better architectural design for the generator network. By switching `batch_norm` to `instance norm` we facilitate the learning process resulting in much better quality.
+[Improved Texture Networks: Maximizing Quality and Diversity in Feed-forward Stylization and Texture Synthesis](https://arxiv.org/abs/1701.02096) presents a better architectural design for the generator network. By switching `batch_norm` to `Instance Norm` we facilitate the learning process resulting in much better quality.
+
+
+
+This also implements the stylization part from [Perceptual Losses for Real-Time Style Transfer and Super-Resolution](https://arxiv.org/abs/1603.08155).
 
 # Prerequisites
-- [Torch7](http://torch.ch/docs/getting-started.html)  
+- [Torch7](http://torch.ch/docs/getting-started.html) + [loadcaffe](https://github.com/szagoruyko/loadcaffe)
 - cudnn + torch.cudnn (optionally)
 - [display](https://github.com/szym/display) (optionally)
 
@@ -24,27 +28,56 @@ Content image|  Dalaunay | Modern
 
 ### Training
 
-Basic example: 
+#### Preparing image dataset
 
+You can use an image dataset of any kind. For my experiments I tried `Imagenet` and `MS COCO` datasets. The structure of the folders should be the following:
+```
+dataset/train
+dataset/train/dummy
+dataset/val/
+dataset/val/dummy
+```
+
+The dummy folders should contain images. The dataloader is based on one used in[fb.resnet.torch](https://github.com/facebook/fb.resnet.torch). 
+
+Here is a quick example for MSCOCO: 
+```
+wget http://msvocds.blob.core.windows.net/coco2014/train2014.zip
+wget http://msvocds.blob.core.windows.net/coco2014/val2014.zip
+unzip train2014.zip
+unzip val2014.zip
+mkdir -p dataset/train
+mkdir -p dataset/val
+ln -s `pwd`/val2014 dataset/val/dummy
+ln -s `pwd`/train2014 dataset/train/dummy
+```
+
+#### Training a network
+
+Basic usage:
 ```
 th train.lua -data <path to any image dataset>  -style_image path/to/img.jpg
 ```
 
-The image dataset should be structured as in [fb.resnet.torch](https://github.com/facebook/fb.resnet.torch) having `train` and `val` folders and some folders corresponding to classes as you were doing classification. You can create a dummy folder `train/dymmy/` and `val/dummy/` and store all the images in them. Only images from `train` forlder will be used.  Change the code or rename folders to use `val` folder. You can use any dataset for example `mscoco` or `imagenet`. Use validation part if using `imagenet`.
+These parameters work for me: 
+```
+th train.lua -data <path to any image dataset> -style_image path/to/img.jpg -style_size 600 -image_size 512 -model johnson -batch_size 4 -learning_rate 1e-2 -style_weight 10 -style_layers relu1_2,relu2_2,relu3_2,relu4_2 -content_layers relu4_2
+```
+Check out issues tab, you will find some useful advices there. 
 
-To achieve the results from the paper you need to play with `-image_size`, `-style_size`, `-style_layers`, `-content_layers`, `-style_weight`. 
+To achieve the results from the paper you need to play with `-image_size`, `-style_size`, `-style_layers`, `-content_layers`, `-style_weight`, `-tv_weight`. 
 
-Do not hesitate to set `batch_size` to one, but remember the larger `batch_size` the larger `learning_rate` you can use.   
+Do not hesitate to set `-batch_size` to one, but remember the larger `-batch_size` the larger `-learning_rate` you can use.   
 
 ### Testing
 
 ```
-th test.lua -input_image path/to/image.jpg -model data/checkpoints/model.t7
+th test.lua -input_image path/to/image.jpg -model_t7 data/checkpoints/model.t7
 ```
 
-Play with `-image_size` here. 
+Play with `-image_size` here. Raise `-cpu` flag to use CPU for processing. 
 
-You can find a **pretrained model** [here](https://yadi.sk/d/0YY_AkFltrVpL). It is *not* the model from the paper.
+You can find a **pretrained model** [here](https://yadi.sk/d/GwL9jNJovBwQg). It is *not* the model from the paper.
 
 ## Generating textures
 
@@ -146,4 +179,4 @@ This model tried to fit both texture and content losses on a fixed set of 16 ima
 
 The code is based on [Justin Johnson's great code](https://github.com/jcjohnson/neural-style) for artistic style.
 
-The work was supported by Yandex and Skoltech.
+The work was supported by [Yandex](https://www.yandex.ru/) and [Skoltech](http://sites.skoltech.ru/compvision/).

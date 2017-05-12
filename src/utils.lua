@@ -1,4 +1,3 @@
-require 'cutorch'
 require 'nn'
 require 'loadcaffe'
 require 'src/SpatialCircularPadding'
@@ -24,16 +23,29 @@ function conv(in_,out_, k, s, m)
     end
 end
 
-function bn(in_, m)
-    return nn.SpatialBatchNormalization(in_,nil,m)
-end
-
 ---------------------------------------------------------
 -- Helper function
 ---------------------------------------------------------
 
+-- from fb.resnet.torch
+function deepCopy(tbl)
+   -- creates a copy of a network with new modules and the same tensors
+   local copy = {}
+   for k, v in pairs(tbl) do
+      if type(v) == 'table' then
+         copy[k] = deepCopy(v)
+      else
+         copy[k] = v
+      end
+   end
+   if torch.typename(tbl) then
+      torch.setmetatable(copy, torch.typename(tbl))
+   end
+   return copy
+end
+
 -- adds first dummy dimension
-function torch.add_dummy(self)
+function torch.FloatTensor:add_dummy()
   local sz = self:size()
   local new_sz = torch.Tensor(sz:size()+1)
   new_sz[1] = 1
@@ -46,17 +58,9 @@ function torch.add_dummy(self)
   end
 end
 
-function torch.FloatTensor:add_dummy()
-  return torch.add_dummy(self)
+if cutorch then 
+  torch.CudaTensor.add_dummy = torch.FloatTensor.add_dummy
 end
-function torch.DoubleTensor:add_dummy()
-  return torch.add_dummy(self)
-end
-
-function torch.CudaTensor:add_dummy()
-  return torch.add_dummy(self)
-end
-
 
 ---------------------------------------------------------
 -- DummyGradOutput
@@ -173,7 +177,7 @@ function preprocess(img)
   return img
 end
 
-function preprocess1(images)
+function preprocess_many(images)
   local out = images:clone()
   for i=1, images:size(1) do
     out[i] = preprocess(images[i]:clone())
@@ -192,3 +196,42 @@ function deprocess(img)
   return img
 end
 
+-----Almost copy paste of jcjohnson's code -----------
+local TVLoss, parent = torch.class('nn.TVLoss', 'nn.Module')
+
+function TVLoss:__init(strength)
+  parent.__init(self)
+  print('Using TV loss with weight ', strength)
+  self.strength = strength
+  self.x_diff = torch.Tensor()
+  self.y_diff = torch.Tensor()
+end
+
+function TVLoss:updateOutput(input)
+  self.output = input
+  return self.output
+end
+
+-- TV loss backward pass inspired by kaishengtai/neuralart
+function TVLoss:updateGradInput(input, gradOutput)
+  self.gradInput:resizeAs(input):zero()
+  
+  for obj = 1, input:size(1) do
+    local input_= input[obj]
+    local C, H, W = input_:size(1), input_:size(2), input_:size(3)
+    self.x_diff:resize(3, H - 1, W - 1)
+    self.y_diff:resize(3, H - 1, W - 1)
+    self.x_diff:copy(input_[{{}, {1, -2}, {1, -2}}])
+    self.x_diff:add(-1, input_[{{}, {1, -2}, {2, -1}}])
+    self.y_diff:copy(input_[{{}, {1, -2}, {1, -2}}])
+    self.y_diff:add(-1, input_[{{}, {2, -1}, {1, -2}}])
+    self.gradInput[obj][{{}, {1, -2}, {1, -2}}]:add(self.x_diff):add(self.y_diff)
+    self.gradInput[obj][{{}, {1, -2}, {2, -1}}]:add(-1, self.x_diff)
+    self.gradInput[obj][{{}, {2, -1}, {1, -2}}]:add(-1, self.y_diff)
+  end
+
+  self.gradInput:mul(self.strength)
+  self.gradInput:add(gradOutput)
+
+  return self.gradInput
+end
